@@ -1,16 +1,14 @@
-# COMP 8800 Final Proposal V3
+# Onekey
 
-Daniel Matthews | A01185843 | 15/04/2026
+Daniel Matthews | A01185843 | 23/04/2026
 
-- - -
+---
 
-Onekey – Your passwords on your hardware
+## Overview
 
-Onekey allows you to store passwords on your hardware, and access them via terminal while you are connected to the local network, WAN connections and wider client support will be a separate project in the future.
+Your passwords on your hardware.
 
-You sit down, open your laptop, and go to google drive to work on a document for school. A bit unusual, but google asks you to re-login to your account. You login, and then google greets you with a message, “Your password was exposed in a data breach, please update your password.” You look at the page and think to yourself, “Well great, now I need to update my password for google; and the ten other sites I use this password on.” You know the answer is to get a password manager, but you don’t really want to spend $50 a year for something like lastpass or keeper; on the other hand though, messing with a domain and routing for something like vaultwarden seems too complicated.
-
-Onekey addresses this by allowing you to run the service on your personal computer or server, storing your passwords on your hardware, while handling the access and routing for you. Onekey gets the benefit of not having to store your data for you, and you get the benefit of not needing to worry about domains, dns, and routing. Allowing you to have a password manager that is affordable, accessible, and on your hardware.
+Onekey is a self-hostable password manager written in go, deployable via docker, and accessed via a terminal client also written in go. 
 
 ## Executive Summary
 
@@ -245,7 +243,7 @@ Setup password history table and implement user password updates for both client
 
 Setup username history table and implement user username updates for both client and server. Implement server User Username Updates unit test. Implement client Update User Username unit test.
 
-### Week 10, 11, 12
+### Weeks 10, 11, 12
 
 Complete unfinished tasks, or if work has gone as scheduled, build web client and implement the same functionality that is in the terminal client.
 
@@ -253,7 +251,7 @@ Complete unfinished tasks, or if work has gone as scheduled, build web client an
 
 I am assuming that the local network is a trusted environment, and that if the project was used outside of a local network, then the server would be protected by something like a reverse proxy with https support, so it has end to end encryption.
 
-## Ethics & Data governance
+## Ethics & Data Governance
 
 Data will be located on users own devices, along with being encrypted, so privacy risks should be very low.
 
