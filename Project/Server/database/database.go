@@ -19,3 +19,18 @@ const CREATE_USERS_TABLE = `CREATE TABLE IF NOT EXISTS users (
 	verifier BLOB NOT NULL,
 	created_at INTEGER DEFAULT (unixepoch())
 	)`
+
+type Session struct {
+	ID        int
+	UserID    int
+	Token     [16]byte
+	ExpiresAt int64
+}
+
+const CREATE_SESSIONS_TABLE = `CREATE TABLE IF NOT EXISTS sessions (
+		id INTEGER PRIMARY KEY,
+		userID INTEGER NOT NULL,
+		token BLOB NOT NULL UNIQUE,
+		expires_at INTEGER NOT NULL,
+		FOREIGN KEY(userID) REFERENCES users(id) ON DELETE CASCADE
+	)`

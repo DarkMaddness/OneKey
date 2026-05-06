@@ -1,0 +1,6 @@
+github.com/1Password/srp v0.2.0 h1:PZKAafEyExnwevliL6d2+FDhJXZ0phxqiG2OeIaj9Xk=
+github.com/1Password/srp v0.2.0/go.mod h1:LIGqQ7eEA0UJT98j7sXk60QWVpHJ3g00BX6LOm9kYTc=
+github.com/pkg/errors v0.9.1/go.mod h1:bwawxfHBFNV+L2hUp1rHADufV3IMtnDRdf1r5NINEl0=
+golang.org/x/text v0.3.4 h1:0YWbFKbhXG/wIiuHDSKpS0Iy7FSA+u45VtBMfQcFTTc=
+golang.org/x/text v0.3.4/go.mod h1:5Zoc/QRtKVWzQhOtBMvqHzDpF6irO9z98xDceosuGiQ=
+golang.org/x/tools v0.0.0-20180917221912-90fa682c2a6e/go.mod h1:n7NCudcB/nEzxVGmLbDWY5pfWTLqBcC2KZ6jyYvM4mQ=
