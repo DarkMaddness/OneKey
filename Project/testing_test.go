@@ -1,9 +1,18 @@
 package main
 
 import (
+	clientEngine "Onekey/Client/engine"
+	serverEngine "Onekey/Server/engine"
+	"context"
 	"crypto/sha256"
+	"errors"
+	"io"
+	"log"
 	"math/big"
+	"net/http"
+	"os"
 	"testing"
+	"time"
 
 	"github.com/1Password/srp"
 )
@@ -68,4 +77,40 @@ func TestSRP(t *testing.T) {
 	}
 
 	// Client: Accept tokens.
+}
+
+func TestEndpoints(t *testing.T) {
+	var (
+		port    string = ":33333"
+		url     string = "localhost:33333"
+		quit           = make(chan bool)
+		atsDone        = make(chan bool)
+	)
+	log.SetOutput(io.Discard)
+	_, w, _ := os.Pipe()
+	os.Stdout = w
+	_, db, err := serverEngine.Startup(":memory:", port, quit, atsDone)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	server := http.Server{Addr: port}
+	go func() {
+		err := server.ListenAndServe()
+		if err != nil && !errors.Is(err, http.ErrServerClosed) {
+			t.Error(err)
+		}
+	}()
+	time.Sleep(10 * time.Millisecond)
+	// Tests go here.
+	t.Run("VerifyURL", func(t *testing.T) {
+		_, err = clientEngine.VerifyURL(url)
+		if err != nil {
+			t.Error(err)
+		}
+	})
+	// End Tests.
+	server.Shutdown(context.Background())
+	quit <- true
+	<-atsDone
 }
