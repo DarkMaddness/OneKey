@@ -256,8 +256,6 @@ func Authenticate(serverURL string) (state state, success bool, sessionToken [16
 			return ERROR, false, [16]byte{}, [16]byte{}, nil, "", fmt.Errorf("Server responded with status code: %d", res.StatusCode)
 		}
 
-		println("salt retrieved.")
-
 		// Extract salt.
 		saltBody := struct {
 			Salt []byte
