@@ -31,7 +31,6 @@ func (handler *register) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusBadRequest)
 		return
 	}
-	log.Println(body.Verifier.Bytes())
 	_, err = handler.DB.Exec("INSERT INTO users (username, salt, verifier) VALUES (?, ?, ?)", body.Username, body.Salt, body.Verifier.Bytes())
 	if err != nil {
 		w.WriteHeader(http.StatusConflict)
@@ -53,7 +52,6 @@ func (handler *auth1) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}{}
 	err := json.NewDecoder(r.Body).Decode(&body)
 	if err != nil {
-		log.Println("Failed Decoding")
 		w.WriteHeader(http.StatusBadRequest)
 		return
 	}
@@ -62,7 +60,6 @@ func (handler *auth1) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	verifierBytes := make([]byte, 0)
 	err = handler.DB.QueryRow("SELECT id, salt, verifier FROM users WHERE username = ?", body.Username).Scan(&id, &salt, &verifierBytes)
 	if err != nil {
-		log.Println("Failed Query")
 		w.WriteHeader(http.StatusBadRequest)
 		return
 	}
@@ -70,20 +67,17 @@ func (handler *auth1) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	srpServer := srp.NewSRPServer(srp.KnownGroups[srp.RFC5054Group4096], verifier, nil)
 	err = srpServer.SetOthersPublic(body.A)
 	if err != nil {
-		log.Println("Failed setting public")
 		w.WriteHeader(http.StatusBadRequest)
 		return
 	}
 	_, err = srpServer.Key()
 	if err != nil {
-		log.Println("Failed deriving key")
 		w.WriteHeader(http.StatusBadRequest)
 		return
 	}
 	b := srpServer.EphemeralPublic()
 	m2, err := srpServer.M(salt, body.Username)
 	if err != nil {
-		log.Println("Failed deriving serverproof")
 		w.WriteHeader(http.StatusBadRequest)
 		return
 	}
@@ -132,7 +126,6 @@ func (handler *auth2) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	value, present := handler.InProgAuth.LoadAndDelete(body.AuthID)
 	if !present {
-		log.Println("No index for ID")
 		w.WriteHeader(http.StatusBadRequest)
 		return
 	}
@@ -141,12 +134,10 @@ func (handler *auth2) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		SRP *srp.SRP
 	})
 	if !ok {
-		log.Println("assert failed")
 		w.WriteHeader(http.StatusBadRequest)
 		return
 	}
 	if !state.SRP.GoodClientProof(body.M1) {
-		log.Println("Bad client Proof")
 		w.WriteHeader(http.StatusBadRequest)
 		return
 	}

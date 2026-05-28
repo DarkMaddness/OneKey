@@ -220,6 +220,7 @@ func Register(serverURL string) (state state, err error) {
 
 func Authenticate(serverURL string) (state state, success bool, sessionToken [16]byte, adminToken [16]byte, aesKey []byte, username string, err error) {
 	for {
+
 		// Get username.
 		fmt.Println("Enter your username. (Press esc to return back to option select.)")
 		username, err := getRawInput(false)
@@ -319,12 +320,20 @@ func Authenticate(serverURL string) (state state, success bool, sessionToken [16
 		if err != nil {
 			return ERROR, false, [16]byte{}, [16]byte{}, nil, "", err
 		}
+
+		// Generate key. This isn't being used, but generating it is a hard requirement for GoodServerProof() and ClientProof().
+		_, err = srpClient.Key()
+		if err != nil {
+			return ERROR, false, [16]byte{}, [16]byte{}, nil, "", err
+		}
+
+		// Check server proof. If it passes then generate our client proof.
+		// If the server proof fails, then we know that the password was wrong,
+		// though for the sake of keeping the server state cleaner, we will complete the
+		// second part of the srp handskae regardless of wheather the server proof passes.
+		// In the case the server proof fails, we will pass an empty slice as our client proo.
 		m1 := make([]byte, 0)
 		if srpClient.GoodServerProof(salt, username, auth1Body.M2) {
-			_, err = srpClient.Key()
-			if err != nil {
-				return ERROR, false, [16]byte{}, [16]byte{}, nil, "", err
-			}
 			m1, err = srpClient.ClientProof()
 			if err != nil {
 				return ERROR, false, [16]byte{}, [16]byte{}, nil, "", err
