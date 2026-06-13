@@ -163,3 +163,29 @@ func (handler *auth2) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	w.Write(res)
 }
+
+type logOut struct {
+	DB  *sql.DB
+	ATS *session.AdminTokenStorage
+}
+
+func (handler *logOut) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	LogRequest(r)
+	body := struct {
+		SessionToken [16]byte
+	}{}
+	err := json.NewDecoder(r.Body).Decode(&body)
+	if err != nil {
+		log.Println(err)
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+	handler.ATS.Remove(body.SessionToken)
+	_, err = handler.DB.Exec("DELETE from sessions WHERE token = ?", body.SessionToken)
+	if err != nil {
+		log.Println(err)
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+}

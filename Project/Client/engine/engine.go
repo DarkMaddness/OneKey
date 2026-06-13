@@ -29,8 +29,15 @@ const (
 	OPTIONS
 	REGISTER
 	AUTHENTICATE
+	LOG_OUT
 	ERROR
 	EXIT
+)
+
+var (
+	ErrUsernameTaken    = errors.New("Username Taken.")
+	ErrUsernameNotFound = errors.New("Username not found.")
+	ErrBadPassword      = errors.New("Incorrect Password.")
 )
 
 func ParseURL() (state state, serverURL string, err error) {
@@ -78,7 +85,37 @@ func Options(loggedIn bool) (state state) {
 
 	// Show options for a loggend in user if they are logged in, otherwise show options for a not logged in user.
 	if loggedIn {
-		return EXIT
+		const (
+			Log_out int = iota
+		)
+		for {
+			fmt.Println("Options:\n" +
+				"0: Log Out")
+			fmt.Println("Choose one of the options by entering it's number.")
+
+			// Scan in from the terminal.
+			if !scanner.Scan() {
+				_ = scanner.Err()
+				fmt.Println("Error parsing choice. Please choose again.")
+				continue
+			}
+
+			// Parse out the first word/number/phrase.
+			choice, err := strconv.Atoi(strings.Split(scanner.Text(), " ")[0])
+			if err != nil {
+				fmt.Println("Error parsing choice. Please choose again.")
+				continue
+			}
+
+			// Switch on the word/number/phrase.
+			switch choice {
+			case Log_out:
+				return LOG_OUT
+			default:
+				fmt.Println("Choice outside expected range. Please choose again.")
+				continue
+			}
+		}
 	} else {
 		const (
 			Register int = iota
@@ -157,19 +194,6 @@ func Register(serverURL string) (state state, err error) {
 		break
 	}
 
-	// Generate the salt and srp verifier.
-	salt := make([]byte, 16)
-	rand.Read(salt)
-	_, srpKey, err := deriveKeys([]byte(password), salt)
-	if err != nil {
-		return ERROR, err
-	}
-	srpClient := srp.NewSRPClient(srp.KnownGroups[srp.RFC5054Group4096], big.NewInt(0).SetBytes(srpKey), nil)
-	verifier, err := srpClient.Verifier()
-	if err != nil {
-		return ERROR, err
-	}
-
 	// Get a username from the user and try to register the account. If the username is already taken, reprompt for a new username.
 	for {
 
@@ -183,39 +207,65 @@ func Register(serverURL string) (state state, err error) {
 			return OPTIONS, nil
 		}
 
-		// Construct request body.
-		req, err := json.Marshal(struct {
-			Username string
-			Salt     []byte
-			Verifier *big.Int
-		}{
-			Username: username,
-			Salt:     salt,
-			Verifier: verifier,
-		})
+		// Form and send request.
+		err = RegistrationHelper(password, username, serverURL)
 		if err != nil {
-			return ERROR, err
+			if errors.Is(err, ErrUsernameTaken) {
+				fmt.Println("Username already in use, you must choose a different one.")
+				continue
+			} else {
+				return ERROR, err
+			}
 		}
 
-		// Send request.
-		res, err := http.Post("http://"+serverURL+"/register", "application/json", bytes.NewReader(req))
-		if err != nil {
-			return ERROR, err
-		}
-		res.Body.Close()
-
-		// Check status code.
-		if res.StatusCode == http.StatusConflict {
-			fmt.Println("Username already in use, you must choose a different one.")
-			continue
-		} else if res.StatusCode == http.StatusBadRequest {
-			return ERROR, errors.New("Something went wrong, server returned status code: 400 Bad Request.")
-		} else if res.StatusCode != http.StatusCreated {
-			return ERROR, fmt.Errorf("Server responded with status code: %d", res.StatusCode)
-		}
 		fmt.Println("Account registered.")
 		return OPTIONS, nil
 	}
+}
+
+func RegistrationHelper(password string, username string, serverURL string) (err error) {
+
+	// Generate the salt and srp verifier.
+	salt := make([]byte, 16)
+	rand.Read(salt)
+	_, srpKey, err := deriveKeys([]byte(password), salt)
+	if err != nil {
+		return err
+	}
+	srpClient := srp.NewSRPClient(srp.KnownGroups[srp.RFC5054Group4096], big.NewInt(0).SetBytes(srpKey), nil)
+	verifier, err := srpClient.Verifier()
+	if err != nil {
+		return err
+	}
+
+	// Construct request body.
+	req := mustMarshal(struct {
+		Username string
+		Salt     []byte
+		Verifier *big.Int
+	}{
+		Username: username,
+		Salt:     salt,
+		Verifier: verifier,
+	})
+
+	// Send request.
+	res, err := http.Post("http://"+serverURL+"/register", "application/json", bytes.NewReader(req))
+	if err != nil {
+		return err
+	}
+	res.Body.Close()
+
+	// Check status code.
+	if res.StatusCode == http.StatusConflict {
+		return ErrUsernameTaken
+	} else if res.StatusCode == http.StatusBadRequest {
+		return errors.New("Something went wrong, server returned status code: 400 Bad Request.")
+	} else if res.StatusCode != http.StatusCreated {
+		return fmt.Errorf("Server responded with status code: %d", res.StatusCode)
+	}
+
+	return nil
 }
 
 func Authenticate(serverURL string) (state state, success bool, sessionToken [16]byte, adminToken [16]byte, aesKey []byte, username string, err error) {
@@ -241,143 +291,180 @@ func Authenticate(serverURL string) (state state, success bool, sessionToken [16
 			return OPTIONS, false, [16]byte{}, [16]byte{}, nil, "", nil
 		}
 
-		// Send request for salt.
-		res, err := http.Get("http://" + serverURL + "/salt/" + username)
+		// Attempt authentication.
+		sessionToken, adminToken, aesKey, err = AuthenticationHelper(serverURL, username, password)
 		if err != nil {
-			return ERROR, false, [16]byte{}, [16]byte{}, nil, "", err
-		}
-
-		// Check status code.
-		if res.StatusCode == http.StatusBadRequest {
-			res.Body.Close()
-			fmt.Println("Username not found.")
-			continue
-		} else if res.StatusCode != http.StatusOK {
-			res.Body.Close()
-			return ERROR, false, [16]byte{}, [16]byte{}, nil, "", fmt.Errorf("Server responded with status code: %d", res.StatusCode)
-		}
-
-		// Extract salt.
-		saltBody := struct {
-			Salt []byte
-		}{}
-		err = json.NewDecoder(res.Body).Decode(&saltBody)
-		res.Body.Close()
-		if err != nil {
-			return ERROR, false, [16]byte{}, [16]byte{}, nil, "", err
-		}
-		salt := saltBody.Salt
-
-		// Derive keys.
-		aesKey, srpKey, err := deriveKeys([]byte(password), salt)
-		if err != nil {
-			return ERROR, false, [16]byte{}, [16]byte{}, nil, "", err
-		}
-
-		// Start handshake.
-		srpClient := srp.NewSRPClient(srp.KnownGroups[srp.RFC5054Group4096], big.NewInt(0).SetBytes(srpKey), nil)
-		req, err := json.Marshal(struct {
-			Username string
-			A        *big.Int
-		}{
-			Username: username,
-			A:        srpClient.EphemeralPublic(),
-		})
-		if err != nil {
-			return ERROR, false, [16]byte{}, [16]byte{}, nil, "", err
-		}
-
-		// Send request.
-		res, err = http.Post("http://"+serverURL+"/auth1", "application/json", bytes.NewReader(req))
-		if err != nil {
-			return ERROR, false, [16]byte{}, [16]byte{}, nil, "", err
-		}
-
-		// Check status code.
-		if res.StatusCode == http.StatusBadRequest {
-			res.Body.Close()
-			fmt.Println("Username not found.")
-			continue
-		} else if res.StatusCode != http.StatusOK {
-			res.Body.Close()
-			return ERROR, false, [16]byte{}, [16]byte{}, nil, "", fmt.Errorf("Server responded with status code: %d", res.StatusCode)
-		}
-
-		// Extract B, Server Proof (M2), and AuthID.
-		auth1Body := struct {
-			B      *big.Int
-			M2     []byte
-			AuthID string
-		}{}
-		err = json.NewDecoder(res.Body).Decode(&auth1Body)
-		res.Body.Close()
-		if err != nil {
-			return ERROR, false, [16]byte{}, [16]byte{}, nil, "", err
-		}
-
-		// Continue handshake.
-		err = srpClient.SetOthersPublic(auth1Body.B)
-		if err != nil {
-			return ERROR, false, [16]byte{}, [16]byte{}, nil, "", err
-		}
-
-		// Generate key. This isn't being used, but generating it is a hard requirement for GoodServerProof() and ClientProof().
-		_, err = srpClient.Key()
-		if err != nil {
-			return ERROR, false, [16]byte{}, [16]byte{}, nil, "", err
-		}
-
-		// Check server proof. If it passes then generate our client proof.
-		// If the server proof fails, then we know that the password was wrong,
-		// though for the sake of keeping the server state cleaner, we will complete the
-		// second part of the srp handskae regardless of wheather the server proof passes.
-		// In the case the server proof fails, we will pass an empty slice as our client proo.
-		m1 := make([]byte, 0)
-		if srpClient.GoodServerProof(salt, username, auth1Body.M2) {
-			m1, err = srpClient.ClientProof()
-			if err != nil {
+			if errors.Is(err, ErrUsernameNotFound) {
+				fmt.Println("Username not found.")
+				continue
+			} else if errors.Is(err, ErrBadPassword) {
+				fmt.Println("Invalid Password")
+				continue
+			} else {
 				return ERROR, false, [16]byte{}, [16]byte{}, nil, "", err
 			}
 		}
-		req, err = json.Marshal(struct {
-			M1     []byte
-			AuthID string
-		}{
-			M1:     m1,
-			AuthID: auth1Body.AuthID,
-		})
-		if err != nil {
-			return ERROR, false, [16]byte{}, [16]byte{}, nil, "", err
-		}
-
-		// Send request.
-		res, err = http.Post("http://"+serverURL+"/auth2", "application/json", bytes.NewReader(req))
-		if err != nil {
-			return ERROR, false, [16]byte{}, [16]byte{}, nil, "", err
-		}
-
-		// Check status code.
-		if res.StatusCode == http.StatusBadRequest {
-			res.Body.Close()
-			fmt.Println("Invalid Password")
-			continue
-		} else if res.StatusCode != http.StatusOK {
-			res.Body.Close()
-			return ERROR, false, [16]byte{}, [16]byte{}, nil, "", fmt.Errorf("Server responded with status code: %d", res.StatusCode)
-		}
-
-		// Extract tokens.
-		auth2Body := struct {
-			SessionToken []byte
-			AdminToken   []byte
-		}{}
-		err = json.NewDecoder(res.Body).Decode(&auth2Body)
-		res.Body.Close()
-		if err != nil {
-			return ERROR, false, [16]byte{}, [16]byte{}, nil, "", err
-		}
-		return OPTIONS, true, [16]byte(auth2Body.SessionToken), [16]byte(auth2Body.AdminToken), aesKey, username, nil
+		return OPTIONS, true, sessionToken, adminToken, aesKey, username, nil
 	}
+}
+
+func AuthenticationHelper(serverURL string, username string, password string) (sessionToken [16]byte, adminToken [16]byte, aesKey []byte, err error) {
+
+	// Send request for salt.
+	saltRes, err := http.Get("http://" + serverURL + "/salt/" + username)
+	if err != nil {
+		return [16]byte{}, [16]byte{}, nil, err
+	}
+	defer saltRes.Body.Close()
+	// Check status code.
+	if saltRes.StatusCode == http.StatusBadRequest {
+		return [16]byte{}, [16]byte{}, nil, ErrUsernameNotFound
+	} else if saltRes.StatusCode != http.StatusOK {
+		return [16]byte{}, [16]byte{}, nil, fmt.Errorf("Server responded with status code: %d", saltRes.StatusCode)
+	}
+
+	// Extract salt.
+	saltBody := struct {
+		Salt []byte
+	}{}
+	err = json.NewDecoder(saltRes.Body).Decode(&saltBody)
+	saltRes.Body.Close()
+	if err != nil {
+		return [16]byte{}, [16]byte{}, nil, err
+	}
+	salt := saltBody.Salt
+
+	// Derive keys.
+	aesKey, srpKey, err := deriveKeys([]byte(password), salt)
+	if err != nil {
+		return [16]byte{}, [16]byte{}, nil, err
+	}
+
+	// Start handshake.
+	srpClient := srp.NewSRPClient(srp.KnownGroups[srp.RFC5054Group4096], big.NewInt(0).SetBytes(srpKey), nil)
+	req := mustMarshal(struct {
+		Username string
+		A        *big.Int
+	}{
+		Username: username,
+		A:        srpClient.EphemeralPublic(),
+	})
+
+	// Send request.
+	auth1Res, err := http.Post("http://"+serverURL+"/auth1", "application/json", bytes.NewReader(req))
+	if err != nil {
+		return [16]byte{}, [16]byte{}, nil, err
+	}
+	defer auth1Res.Body.Close()
+	// Check status code.
+	if auth1Res.StatusCode == http.StatusBadRequest {
+		return [16]byte{}, [16]byte{}, nil, ErrUsernameNotFound
+	} else if auth1Res.StatusCode != http.StatusOK {
+		return [16]byte{}, [16]byte{}, nil, fmt.Errorf("Server responded with status code: %d", auth1Res.StatusCode)
+	}
+
+	// Extract B, Server Proof (M2), and AuthID.
+	auth1Body := struct {
+		B      *big.Int
+		M2     []byte
+		AuthID string
+	}{}
+	err = json.NewDecoder(auth1Res.Body).Decode(&auth1Body)
+	auth1Res.Body.Close()
+	if err != nil {
+		return [16]byte{}, [16]byte{}, nil, err
+	}
+
+	// Continue handshake.
+	err = srpClient.SetOthersPublic(auth1Body.B)
+	if err != nil {
+		return [16]byte{}, [16]byte{}, nil, err
+	}
+
+	// Generate key. This isn't being used, but generating it is a hard requirement for GoodServerProof() and ClientProof().
+	_, err = srpClient.Key()
+	if err != nil {
+		return [16]byte{}, [16]byte{}, nil, err
+	}
+
+	// Check server proof. If it passes then generate our client proof.
+	// If the server proof fails, then we know that the password was wrong,
+	// though for the sake of keeping the server state cleaner, we will complete the
+	// second part of the srp handskae regardless of wheather the server proof passes.
+	// In the case the server proof fails, we will pass an empty slice as our client proo.
+	m1 := make([]byte, 0)
+	if srpClient.GoodServerProof(salt, username, auth1Body.M2) {
+		m1, err = srpClient.ClientProof()
+		if err != nil {
+			return [16]byte{}, [16]byte{}, nil, err
+		}
+	}
+	req = mustMarshal(struct {
+		M1     []byte
+		AuthID string
+	}{
+		M1:     m1,
+		AuthID: auth1Body.AuthID,
+	})
+
+	// Send request.
+	auth2Res, err := http.Post("http://"+serverURL+"/auth2", "application/json", bytes.NewReader(req))
+	if err != nil {
+		return [16]byte{}, [16]byte{}, nil, err
+	}
+	defer auth2Res.Body.Close()
+	// Check status code.
+	if auth2Res.StatusCode == http.StatusBadRequest {
+		return [16]byte{}, [16]byte{}, nil, ErrBadPassword
+	} else if auth2Res.StatusCode != http.StatusOK {
+		return [16]byte{}, [16]byte{}, nil, fmt.Errorf("Server responded with status code: %d", auth2Res.StatusCode)
+	}
+
+	// Extract tokens.
+	auth2Body := struct {
+		SessionToken []byte
+		AdminToken   []byte
+	}{}
+	err = json.NewDecoder(auth2Res.Body).Decode(&auth2Body)
+	auth2Res.Body.Close()
+	if err != nil {
+		return [16]byte{}, [16]byte{}, nil, err
+	}
+	return [16]byte(auth2Body.SessionToken), [16]byte(auth2Body.AdminToken), aesKey, nil
+}
+
+func LogOut(serverURL string, sessionTk [16]byte) (state state, sessionActive bool, sessionToken [16]byte, adminToken [16]byte, aesKey []byte, username string, err error) {
+
+	// Construct request body.
+	req := mustMarshal(struct {
+		SessionToken [16]byte
+	}{
+		SessionToken: sessionTk,
+	})
+
+	// Send first request.
+	attempt1, err := http.Post("http://"+serverURL+"/logout", "application/json", bytes.NewReader(req))
+
+	// If we got a response then close the body.
+	if err == nil {
+		attempt1.Body.Close()
+	}
+
+	// Check if it succeded. If it failed then try once more.
+	if err != nil || attempt1.StatusCode != http.StatusOK {
+
+		// Send second request.
+		attempt2, err := http.Post("http://"+serverURL+"/logout", "application/json", bytes.NewReader(req))
+
+		// If we get a response then close the body.
+		if err == nil {
+			attempt2.Body.Close()
+		}
+	}
+
+	// Regardless of response set tokens and keys to type initialization values.
+	// Even if the requests failed, we keep the appearance that they succeded.
+	return OPTIONS, false, [16]byte{}, [16]byte{}, nil, "", nil
 }
 
 func getRawInput(hidden bool) (word string, err error) {
@@ -471,4 +558,12 @@ func deriveKeys(password []byte, salt []byte) (aesKey []byte, srpKey []byte, err
 		return nil, nil, err
 	}
 	return aesKey, srpKey, nil
+}
+
+func mustMarshal(v any) []byte {
+	ret, err := json.Marshal(v)
+	if err != nil {
+		panic("Json Marshaling failed: " + err.Error())
+	}
+	return ret
 }

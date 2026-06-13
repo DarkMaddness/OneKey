@@ -30,6 +30,8 @@ main:
 			state, err = Register(serverURL)
 		case AUTHENTICATE:
 			state, loggedIn, sessionToken, adminToken, aesKey, username, err = Authenticate(serverURL)
+		case LOG_OUT:
+			state, loggedIn, sessionToken, adminToken, aesKey, username, err = LogOut(serverURL, sessionToken)
 		case ERROR:
 			fmt.Println(err)
 			state = EXIT
