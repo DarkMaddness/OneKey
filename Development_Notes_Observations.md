@@ -16,4 +16,11 @@ Things got a bit busy, but by the end of this week I will have account creation 
 
 I have also decided that I will get rid of the specific SRP test because the authentication test is basically a super set of it anyways.
 
-This has taken more time then I expected, so I am deciding now that I won't make a web client. If I have completed my features and have time left over, I will improve the existing client makiing the navigation more like a TUI instead of a simple option select with numbers like it is now.
+This has taken more time then I expected, so I am deciding now that I won't make a web client. If I have completed my features and have time left over, I will improve the existing client making the navigation more like a TUI instead of a simple option select with numbers like it is now.
+
+## Weeks 7 and 8
+I intended to implement entry creation and retrieval, but when deciding the process flow for entries, I made the decision to instead of grabbing all the user's entries in full, I would instead grab just the titles and IDs of the entries, then when the user selected one, I would grab the whole entry using the ID and session token. 
+
+When planning the work for this week I forgot that I would need decide my process for expired tokens, so that was additional work I hadn't expected here.
+
+I would say that I am on a good pace to implement the features I want for the project.

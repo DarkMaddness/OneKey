@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"log"
 	"math/big"
 	"net/http"
@@ -181,11 +182,71 @@ func (handler *logOut) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	handler.ATS.Remove(body.SessionToken)
-	_, err = handler.DB.Exec("DELETE from sessions WHERE token = ?", body.SessionToken)
+	_, err = handler.DB.Exec("DELETE FROM sessions WHERE token = ?", body.SessionToken)
 	if err != nil {
 		log.Println(err)
 		w.WriteHeader(http.StatusBadRequest)
 		return
 	}
 	w.WriteHeader(http.StatusOK)
+}
+
+type titles struct {
+	DB *sql.DB
+}
+
+func (handler *titles) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	type Title struct {
+		ID    int
+		Title []byte
+	}
+	LogRequest(r)
+	body := struct {
+		SessionToken [16]byte
+	}{}
+	err := json.NewDecoder(r.Body).Decode(&body)
+	if err != nil {
+		log.Println(err)
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+	row := handler.DB.QueryRow("SELECT id FROM sessions WHERE token = ?", body.SessionToken)
+	if row.Err() != nil {
+		if errors.Is(row.Err(), sql.ErrNoRows) {
+			log.Println("Request made with unknown token")
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		} else {
+			log.Println(err)
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+	}
+	rows, err := handler.DB.Query("SELECT entries.id, title FROM entries JOIN sessions ON entries.userID = sessions.userID WHERE token = ?", body.SessionToken)
+	if err != nil {
+		log.Println(err)
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+	defer rows.Close()
+	var titles []Title
+	for rows.Next() {
+		var title Title
+		err = rows.Scan(&title.ID, &title.Title)
+		if err != nil {
+			log.Println(err)
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		titles = append(titles, title)
+	}
+	if err = rows.Err(); err != nil {
+		log.Println(err)
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+	res, _ := json.Marshal(titles)
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	w.Write(res)
 }

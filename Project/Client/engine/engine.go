@@ -3,6 +3,8 @@ package engine
 import (
 	"bufio"
 	"bytes"
+	"crypto/aes"
+	"crypto/cipher"
 	"crypto/hkdf"
 	"crypto/rand"
 	"crypto/sha256"
@@ -21,18 +23,23 @@ import (
 	"golang.org/x/term"
 )
 
-type state int
+type State int
 
 const (
-	PARSE_URL state = iota
+	PARSE_URL State = iota
 	VERIFY_URL
 	OPTIONS
 	REGISTER
 	AUTHENTICATE
+	RE_AUTHENTICATE
+	ENTRIES
+	GET_ENTRY
+	NEW_ENTRY
 	LOG_OUT
 	ERROR
 	EXIT
 )
+const NO_RETRY State = -1
 
 var (
 	ErrUsernameTaken    = errors.New("Username Taken.")
@@ -40,14 +47,14 @@ var (
 	ErrBadPassword      = errors.New("Incorrect Password.")
 )
 
-func ParseURL() (state state, serverURL string, err error) {
+func ParseURL() (state State, serverURL string, err error) {
 	if len(os.Args) != 2 {
 		return ERROR, "", errors.New("The client takes exactly 1 additional argument, The base url of the server you are trying to connect to. Ex 192.168.1.47:32500 or mypasswordmanager.ca")
 	}
 	return VERIFY_URL, os.Args[1], nil
 }
 
-func VerifyURL(url string) (state state, err error) {
+func VerifyURL(url string) (state State, err error) {
 
 	// Send GET request to server.
 	res, err := http.Get("http://" + url + "/ping")
@@ -80,17 +87,19 @@ func VerifyURL(url string) (state state, err error) {
 	return OPTIONS, nil
 }
 
-func Options(loggedIn bool) (state state) {
+func Options(loggedIn bool) (state State) {
 	scanner := bufio.NewScanner(os.Stdin)
 
 	// Show options for a loggend in user if they are logged in, otherwise show options for a not logged in user.
 	if loggedIn {
 		const (
-			Log_out int = iota
+			Get_entries int = iota
+			Log_out
 		)
 		for {
 			fmt.Println("Options:\n" +
-				"0: Log Out")
+				"0: Get Entries" +
+				"1: Log Out")
 			fmt.Println("Choose one of the options by entering it's number.")
 
 			// Scan in from the terminal.
@@ -109,6 +118,8 @@ func Options(loggedIn bool) (state state) {
 
 			// Switch on the word/number/phrase.
 			switch choice {
+			case Get_entries:
+				return ENTRIES
 			case Log_out:
 				return LOG_OUT
 			default:
@@ -159,7 +170,7 @@ func Options(loggedIn bool) (state state) {
 	}
 }
 
-func Register(serverURL string) (state state, err error) {
+func Register(serverURL string) (state State, err error) {
 	password := ""
 
 	// Get a password from the user, or return to options if user hits esc.
@@ -268,7 +279,7 @@ func RegistrationHelper(password string, username string, serverURL string) (err
 	return nil
 }
 
-func Authenticate(serverURL string) (state state, success bool, sessionToken [16]byte, adminToken [16]byte, aesKey []byte, username string, err error) {
+func Authenticate(serverURL string) (state State, sessionToken [16]byte, adminToken [16]byte, aesKey []byte, username string, err error) {
 	for {
 
 		// Get username.
@@ -276,9 +287,9 @@ func Authenticate(serverURL string) (state state, success bool, sessionToken [16
 		username, err := getRawInput(false)
 		fmt.Println()
 		if err != nil {
-			return ERROR, false, [16]byte{}, [16]byte{}, nil, "", err
+			return ERROR, [16]byte{}, [16]byte{}, nil, "", err
 		} else if username == "" {
-			return OPTIONS, false, [16]byte{}, [16]byte{}, nil, "", nil
+			return OPTIONS, [16]byte{}, [16]byte{}, nil, "", nil
 		}
 
 		// Get password.
@@ -286,9 +297,9 @@ func Authenticate(serverURL string) (state state, success bool, sessionToken [16
 		password, err := getRawInput(true)
 		fmt.Println()
 		if err != nil {
-			return ERROR, false, [16]byte{}, [16]byte{}, nil, "", err
+			return ERROR, [16]byte{}, [16]byte{}, nil, "", err
 		} else if password == "" {
-			return OPTIONS, false, [16]byte{}, [16]byte{}, nil, "", nil
+			return OPTIONS, [16]byte{}, [16]byte{}, nil, "", nil
 		}
 
 		// Attempt authentication.
@@ -301,13 +312,42 @@ func Authenticate(serverURL string) (state state, success bool, sessionToken [16
 				fmt.Println("Invalid Password")
 				continue
 			} else {
-				return ERROR, false, [16]byte{}, [16]byte{}, nil, "", err
+				return ERROR, [16]byte{}, [16]byte{}, nil, "", err
 			}
 		}
-		return OPTIONS, true, sessionToken, adminToken, aesKey, username, nil
+		return OPTIONS, sessionToken, adminToken, aesKey, username, nil
 	}
 }
 
+func ReAuthenticate(serverURL string, username string, retryState State) (state State, sessionToken [16]byte, adminToken [16]byte, aesKey []byte, err error) {
+	for {
+
+		// Get password.
+		fmt.Println("Enter your password. (Press esc to return back to option select.)")
+		password, err := getRawInput(true)
+		fmt.Println()
+		if err != nil {
+			return ERROR, [16]byte{}, [16]byte{}, nil, err
+		} else if password == "" {
+			return OPTIONS, [16]byte{}, [16]byte{}, nil, nil
+		}
+
+		// Attempt authentication.
+		sessionToken, adminToken, aesKey, err = AuthenticationHelper(serverURL, username, password)
+		if err != nil {
+			if errors.Is(err, ErrUsernameNotFound) {
+				fmt.Println("Username not found.")
+				return OPTIONS, [16]byte{}, [16]byte{}, nil, nil
+			} else if errors.Is(err, ErrBadPassword) {
+				fmt.Println("Invalid Password")
+				continue
+			} else {
+				return ERROR, [16]byte{}, [16]byte{}, nil, err
+			}
+		}
+		return retryState, sessionToken, adminToken, aesKey, nil
+	}
+}
 func AuthenticationHelper(serverURL string, username string, password string) (sessionToken [16]byte, adminToken [16]byte, aesKey []byte, err error) {
 
 	// Send request for salt.
@@ -433,7 +473,92 @@ func AuthenticationHelper(serverURL string, username string, password string) (s
 	return [16]byte(auth2Body.SessionToken), [16]byte(auth2Body.AdminToken), aesKey, nil
 }
 
-func LogOut(serverURL string, sessionTk [16]byte) (state state, sessionActive bool, sessionToken [16]byte, adminToken [16]byte, aesKey []byte, username string, err error) {
+func Entries(serverURL string, sessionToken [16]byte, aesKey []byte) (state State, entryID int, retryState State, err error) {
+
+	// Construct request body.
+	req := mustMarshal(struct {
+		SessionToken [16]byte
+	}{
+		sessionToken,
+	})
+
+	// Send request.
+	res, err := http.Post("http://"+serverURL+"/titles", "application/json", bytes.NewReader(req))
+	if err != nil {
+		return ERROR, 0, NO_RETRY, err
+	}
+	defer res.Body.Close()
+	// Check status code.
+	if res.StatusCode == http.StatusUnauthorized {
+		return RE_AUTHENTICATE, 0, ENTRIES, nil
+	} else if res.StatusCode != http.StatusOK {
+		return ERROR, 0, NO_RETRY, fmt.Errorf("Server responded with status code: %d", res.StatusCode)
+	}
+
+	// Extract titles.
+	encryptedTitles := []struct {
+		ID    int
+		Title []byte
+	}{}
+	err = json.NewDecoder(res.Body).Decode(&encryptedTitles)
+	if err != nil {
+		return ERROR, 0, NO_RETRY, err
+	}
+
+	// Print prompt.
+	fmt.Println("Options:\n" +
+		"0: Return to main options select")
+	ciph, err := aes.NewCipher(aesKey)
+	if err != nil {
+		return ERROR, 0, NO_RETRY, err
+	}
+	decrypter, err := cipher.NewGCMWithRandomNonce(ciph)
+	if err != nil {
+		return ERROR, 0, NO_RETRY, err
+	}
+	for index, title := range encryptedTitles {
+		text, err := decrypter.Open(nil, nil, title.Title, nil)
+		if err != nil {
+			return ERROR, 0, NO_RETRY, err
+		}
+		fmt.Printf("%d: Inspect entry %s\n", index+1, string(text))
+	}
+	fmt.Printf("%d: Create new entry", len(encryptedTitles)+1)
+
+	// Get choice.
+	scanner := bufio.NewScanner(os.Stdin)
+	for {
+
+		// Scan in from the terminal.
+		if !scanner.Scan() {
+			_ = scanner.Err()
+			fmt.Println("Error parsing choice. Please choose again.")
+			continue
+		}
+
+		// Parse out the first number/word.
+		choice, err := strconv.Atoi(strings.Split(scanner.Text(), " ")[0])
+		if err != nil {
+			fmt.Println("Error parsing choice. Please choose again.")
+			continue
+		}
+
+		// Switch on the number.
+		switch {
+		case choice == 0:
+			return OPTIONS, 0, NO_RETRY, nil
+		case choice > 0 && choice <= len(encryptedTitles):
+			return GET_ENTRY, encryptedTitles[choice].ID, NO_RETRY, nil
+		case choice == len(encryptedTitles)+1:
+			return NEW_ENTRY, 0, NO_RETRY, nil
+		default:
+			fmt.Println("Choice outside expected range. Please choose again.")
+			continue
+		}
+	}
+}
+
+func LogOut(serverURL string, sessionTk [16]byte) (state State, sessionToken [16]byte, adminToken [16]byte, aesKey []byte, username string) {
 
 	// Construct request body.
 	req := mustMarshal(struct {
@@ -464,7 +589,7 @@ func LogOut(serverURL string, sessionTk [16]byte) (state state, sessionActive bo
 
 	// Regardless of response set tokens and keys to type initialization values.
 	// Even if the requests failed, we keep the appearance that they succeded.
-	return OPTIONS, false, [16]byte{}, [16]byte{}, nil, "", nil
+	return OPTIONS, [16]byte{}, [16]byte{}, nil, ""
 }
 
 func getRawInput(hidden bool) (word string, err error) {

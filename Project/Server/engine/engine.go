@@ -54,6 +54,12 @@ func Startup(dbName string, port string, quit <-chan bool, tcDone chan<- bool) (
 		return ERROR, nil, err
 	}
 
+	// Run Entry table creation query and check for any errors.
+	_, err = db.Exec(database.CREATE_ENTRIES_TABLE)
+	if err != nil {
+		return ERROR, nil, err
+	}
+
 	// Create admin token management structure and start token cleaner.
 	ats := session.NewAdminTokenStorage()
 	go tokenCleaner(ats, db, quit, tcDone)

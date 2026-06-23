@@ -9,11 +9,12 @@ func main() {
 	var (
 		state        = PARSE_URL
 		serverURL    string
-		loggedIn     bool = false
 		sessionToken [16]byte
 		adminToken   [16]byte
 		aesKey       []byte
 		username     string
+		entryID      int
+		retryState   State
 		err          error
 	)
 
@@ -25,13 +26,17 @@ main:
 		case VERIFY_URL:
 			state, err = VerifyURL(serverURL)
 		case OPTIONS:
-			state = Options(loggedIn)
+			state = Options(isLoggedIn(sessionToken))
 		case REGISTER:
 			state, err = Register(serverURL)
 		case AUTHENTICATE:
-			state, loggedIn, sessionToken, adminToken, aesKey, username, err = Authenticate(serverURL)
+			state, sessionToken, adminToken, aesKey, username, err = Authenticate(serverURL)
+		case RE_AUTHENTICATE:
+			state, sessionToken, adminToken, aesKey, err = ReAuthenticate(serverURL, username, retryState)
+		case ENTRIES:
+			state, entryID, retryState, err = Entries(serverURL, sessionToken, aesKey)
 		case LOG_OUT:
-			state, loggedIn, sessionToken, adminToken, aesKey, username, err = LogOut(serverURL, sessionToken)
+			state, sessionToken, adminToken, aesKey, username = LogOut(serverURL, sessionToken)
 		case ERROR:
 			fmt.Println(err)
 			state = EXIT
@@ -40,4 +45,8 @@ main:
 			break main
 		}
 	}
+}
+
+func isLoggedIn(sessionToken [16]byte) bool {
+	return sessionToken != [16]byte{}
 }

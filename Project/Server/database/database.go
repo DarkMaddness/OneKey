@@ -34,3 +34,18 @@ const CREATE_SESSIONS_TABLE = `CREATE TABLE IF NOT EXISTS sessions (
 		expires_at INTEGER NOT NULL,
 		FOREIGN KEY(userID) REFERENCES users(id) ON DELETE CASCADE
 	)`
+
+type Entry struct {
+	ID     int
+	UserID int
+	title  []byte
+	data   []byte
+}
+
+const CREATE_ENTRIES_TABLE = `CREATE TABLE IF NOT EXIST entries (
+		id INTEGER PRIMARY KEY,
+		userID INTEGER NOT NULL,
+		title BLOB NOT NULL,
+		data BLOB NOT NULL,
+		FOREIGN KEY(userID) REFERENCES users(id) ON DELETE CASCADE
+	)`
