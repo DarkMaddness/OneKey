@@ -35,13 +35,16 @@ main:
 			state, sessionToken, adminToken, aesKey, err = ReAuthenticate(serverURL, username, retryState)
 		case ENTRIES:
 			state, entryID, retryState, err = Entries(serverURL, sessionToken, aesKey)
+		case GET_ENTRY:
+			state, retryState, err = Entry(serverURL, sessionToken, aesKey, entryID)
+		case NEW_ENTRY:
+			state, err = NewEntry(serverURL, sessionToken, adminToken, aesKey)
 		case LOG_OUT:
 			state, sessionToken, adminToken, aesKey, username = LogOut(serverURL, sessionToken)
 		case ERROR:
 			fmt.Println(err)
 			state = EXIT
 		case EXIT:
-			println(len(sessionToken), len(adminToken), len(aesKey), username)
 			break main
 		}
 	}

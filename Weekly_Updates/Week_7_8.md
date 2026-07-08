@@ -8,6 +8,7 @@
 
 - Implemented entry title retrieval.
 - Implemented token expiration detection, and automated re-authentication and retry workflow.
+- Implemented entries  table.
 
 # Challenges Faced
 

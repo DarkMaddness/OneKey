@@ -286,3 +286,6 @@ I thought about preventing timing attacks on salt retrieval by adding a time gat
 | Updating the account username           | Can you update the username of the account and login.                        | Manual Test  |
 | Deleting the account                    | Can you delete the account and no longer login.                              | Manual Test  |
 | Encryption test                         | Verify by looking at the database and seeing that all entries are encrypted. | Manual Test  |
+## Conclusion
+## Lessens learned 
+## Future Work

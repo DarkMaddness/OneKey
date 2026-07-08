@@ -210,9 +210,10 @@ func (handler *titles) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusBadRequest)
 		return
 	}
-	row := handler.DB.QueryRow("SELECT id FROM sessions WHERE token = ?", body.SessionToken)
-	if row.Err() != nil {
-		if errors.Is(row.Err(), sql.ErrNoRows) {
+	id := 0
+	err = handler.DB.QueryRow("SELECT id FROM sessions WHERE token = ?", body.SessionToken[:]).Scan(&id)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
 			log.Println("Request made with unknown token")
 			w.WriteHeader(http.StatusUnauthorized)
 			return
@@ -222,7 +223,7 @@ func (handler *titles) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	rows, err := handler.DB.Query("SELECT entries.id, title FROM entries JOIN sessions ON entries.userID = sessions.userID WHERE token = ?", body.SessionToken)
+	rows, err := handler.DB.Query("SELECT entries.id, title FROM entries JOIN sessions ON entries.userID = sessions.userID WHERE token = ?", body.SessionToken[:])
 	if err != nil {
 		log.Println(err)
 		w.WriteHeader(http.StatusBadRequest)
@@ -249,4 +250,104 @@ func (handler *titles) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	w.Write(res)
+}
+
+type entry struct {
+	DB *sql.DB
+}
+
+func (handler *entry) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	LogRequest(r)
+	body := struct {
+		SessionToken [16]byte
+		EntryID      int
+	}{}
+	err := json.NewDecoder(r.Body).Decode(&body)
+	if err != nil {
+		log.Println(err)
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+	id := 0
+	err = handler.DB.QueryRow("SELECT id FROM sessions WHERE token = ?", body.SessionToken[:]).Scan(&id)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			log.Println("Request made with unknown token")
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		} else {
+			log.Println(err)
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+	}
+	title := []byte{}
+	data := []byte{}
+	err = handler.DB.QueryRow("SELECT title, data FROM entries JOIN sessions ON entries.userID = sessions.userID WHERE token = ? AND entries.id = ?", body.SessionToken[:], body.EntryID).Scan(&title, &data)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		} else {
+			log.Println(err)
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+	}
+	res, _ := json.Marshal(struct {
+		Title []byte
+		Data  []byte
+	}{
+		Title: title,
+		Data:  data,
+	})
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	w.Write(res)
+}
+
+type new_entry struct {
+	DB  *sql.DB
+	ATS *session.AdminTokenStorage
+}
+
+func (handler *new_entry) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	LogRequest(r)
+	body := struct {
+		SessionToken [16]byte
+		AdminToken   [16]byte
+		Title        []byte
+		Data         []byte
+	}{}
+	err := json.NewDecoder(r.Body).Decode(&body)
+	if err != nil {
+		log.Println(err)
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+	id := 0
+	err = handler.DB.QueryRow("SELECT userID FROM sessions WHERE token = ?", body.SessionToken[:]).Scan(&id)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			log.Println("Request made with unknown token")
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		} else {
+			log.Println(err)
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+	}
+	if !handler.ATS.Check(body.SessionToken, body.AdminToken) {
+		log.Println("Invalid admin token used.")
+		w.WriteHeader(http.StatusForbidden)
+		return
+	}
+	_, err = handler.DB.Exec("INSERT INTO entries (userID, title, data) VALUES (?, ?, ?)", id, body.Title, body.Data)
+	if err != nil {
+		log.Println(err)
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+	w.WriteHeader(http.StatusCreated)
 }

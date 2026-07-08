@@ -42,7 +42,7 @@ type Entry struct {
 	data   []byte
 }
 
-const CREATE_ENTRIES_TABLE = `CREATE TABLE IF NOT EXIST entries (
+const CREATE_ENTRIES_TABLE = `CREATE TABLE IF NOT EXISTS entries (
 		id INTEGER PRIMARY KEY,
 		userID INTEGER NOT NULL,
 		title BLOB NOT NULL,

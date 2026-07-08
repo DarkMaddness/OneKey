@@ -35,6 +35,8 @@ const (
 	ENTRIES
 	GET_ENTRY
 	NEW_ENTRY
+	EDIT_ENTRY
+	DELETE_ENTRY
 	LOG_OUT
 	ERROR
 	EXIT
@@ -93,13 +95,13 @@ func Options(loggedIn bool) (state State) {
 	// Show options for a loggend in user if they are logged in, otherwise show options for a not logged in user.
 	if loggedIn {
 		const (
-			Get_entries int = iota
-			Log_out
+			Log_out int = iota
+			Get_entries
 		)
 		for {
 			fmt.Println("Options:\n" +
-				"0: Get Entries" +
-				"1: Log Out")
+				"0: Log Out\n" +
+				"1: Get Entries")
 			fmt.Println("Choose one of the options by entering it's number.")
 
 			// Scan in from the terminal.
@@ -118,10 +120,10 @@ func Options(loggedIn bool) (state State) {
 
 			// Switch on the word/number/phrase.
 			switch choice {
-			case Get_entries:
-				return ENTRIES
 			case Log_out:
 				return LOG_OUT
+			case Get_entries:
+				return ENTRIES
 			default:
 				fmt.Println("Choice outside expected range. Please choose again.")
 				continue
@@ -129,15 +131,15 @@ func Options(loggedIn bool) (state State) {
 		}
 	} else {
 		const (
-			Register int = iota
+			Exit int = iota
 			Log_In
-			Exit
+			Register
 		)
 		for {
 			fmt.Println("Options:\n" +
-				"0: Register\n" +
+				"0: Exit\n" +
 				"1: Log In\n" +
-				"2: Exit")
+				"2: Register")
 			fmt.Println("Choose one of the options by entering it's number.")
 
 			// Scan in from the terminal.
@@ -156,12 +158,12 @@ func Options(loggedIn bool) (state State) {
 
 			// Switch on the word/number/phrase.
 			switch choice {
-			case Register:
-				return REGISTER
-			case Log_In:
-				return AUTHENTICATE
 			case Exit:
 				return EXIT
+			case Log_In:
+				return AUTHENTICATE
+			case Register:
+				return REGISTER
 			default:
 				fmt.Println("Choice outside expected range. Please choose again.")
 				continue
@@ -481,7 +483,6 @@ func Entries(serverURL string, sessionToken [16]byte, aesKey []byte) (state Stat
 	}{
 		sessionToken,
 	})
-
 	// Send request.
 	res, err := http.Post("http://"+serverURL+"/titles", "application/json", bytes.NewReader(req))
 	if err != nil {
@@ -521,9 +522,9 @@ func Entries(serverURL string, sessionToken [16]byte, aesKey []byte) (state Stat
 		if err != nil {
 			return ERROR, 0, NO_RETRY, err
 		}
-		fmt.Printf("%d: Inspect entry %s\n", index+1, string(text))
+		fmt.Printf("%d: Inspect entry: %s\n", index+1, string(text))
 	}
-	fmt.Printf("%d: Create new entry", len(encryptedTitles)+1)
+	fmt.Printf("%d: Create new entry\n", len(encryptedTitles)+1)
 
 	// Get choice.
 	scanner := bufio.NewScanner(os.Stdin)
@@ -548,7 +549,7 @@ func Entries(serverURL string, sessionToken [16]byte, aesKey []byte) (state Stat
 		case choice == 0:
 			return OPTIONS, 0, NO_RETRY, nil
 		case choice > 0 && choice <= len(encryptedTitles):
-			return GET_ENTRY, encryptedTitles[choice].ID, NO_RETRY, nil
+			return GET_ENTRY, encryptedTitles[choice-1].ID, NO_RETRY, nil
 		case choice == len(encryptedTitles)+1:
 			return NEW_ENTRY, 0, NO_RETRY, nil
 		default:
@@ -556,6 +557,259 @@ func Entries(serverURL string, sessionToken [16]byte, aesKey []byte) (state Stat
 			continue
 		}
 	}
+}
+
+func Entry(serverURL string, sessionToken [16]byte, aesKey []byte, entryID int) (state State, retryState State, err error) {
+
+	// Construct request body.
+	req := mustMarshal(struct {
+		SessionToken [16]byte
+		EntryID      int
+	}{
+		sessionToken,
+		entryID,
+	})
+
+	// Send request.
+	res, err := http.Post("http://"+serverURL+"/entry", "application/json", bytes.NewReader(req))
+	if err != nil {
+		return ERROR, NO_RETRY, err
+	}
+	defer res.Body.Close()
+	// Check status code.
+	if res.StatusCode == http.StatusUnauthorized {
+		return RE_AUTHENTICATE, GET_ENTRY, nil
+	} else if res.StatusCode == http.StatusNotFound {
+		fmt.Println("Entry not found, it may have been deleted.")
+		return ENTRIES, NO_RETRY, nil
+	} else if res.StatusCode != http.StatusOK {
+		return ERROR, NO_RETRY, fmt.Errorf("Server responded with status code: %d", res.StatusCode)
+	}
+
+	// Extract entry.
+	encryptedEntry := struct {
+		Title []byte
+		Data  []byte
+	}{}
+	err = json.NewDecoder(res.Body).Decode(&encryptedEntry)
+	if err != nil {
+		return ERROR, NO_RETRY, err
+	}
+	ciph, err := aes.NewCipher(aesKey)
+	if err != nil {
+		return ERROR, NO_RETRY, err
+	}
+	decrypter, err := cipher.NewGCMWithRandomNonce(ciph)
+	if err != nil {
+		return ERROR, NO_RETRY, err
+	}
+	title, err := decrypter.Open(nil, nil, encryptedEntry.Title, nil)
+	if err != nil {
+		return ERROR, NO_RETRY, err
+	}
+	data, err := decrypter.Open(nil, nil, encryptedEntry.Data, nil)
+	if err != nil {
+		return ERROR, NO_RETRY, err
+	}
+	decryptedDetails := struct {
+		Username string
+		Password string
+	}{}
+	err = json.Unmarshal(data, &decryptedDetails)
+	if err != nil {
+		return ERROR, NO_RETRY, err
+	}
+
+	// Print prompt.
+	fmt.Println("Options:\n" +
+		"0: Go back to entries\n" +
+		"1: Edit entry\n" +
+		"2: Delete entry")
+
+	fmt.Printf("Title: %s\nUsername: %s\nPassword: %s\n", string(title), decryptedDetails.Username, decryptedDetails.Password)
+	fmt.Print("Choice: ")
+
+	// Get choice.
+	scanner := bufio.NewScanner(os.Stdin)
+	for {
+
+		// Scan in from the terminal.
+		if !scanner.Scan() {
+			_ = scanner.Err()
+			fmt.Print("\033[A\033[2K")
+			fmt.Print("Error parsing choice. Please choose again: ")
+			continue
+		}
+
+		// Parse out the first number/word.
+		choice, err := strconv.Atoi(strings.Split(scanner.Text(), " ")[0])
+		if err != nil {
+			fmt.Print("\033[A\033[2K")
+			fmt.Print("Error parsing choice. Please choose again: ")
+			continue
+		}
+
+		// Switch on the number.
+		switch choice {
+		case 0:
+			fmt.Print("\033[9A\033[J")
+			return ENTRIES, NO_RETRY, nil
+		case 1:
+			fmt.Print("\033[9A\033[J")
+			return EDIT_ENTRY, NO_RETRY, nil
+		case 2:
+			fmt.Print("\033[9A\033[J")
+			return DELETE_ENTRY, NO_RETRY, nil
+		default:
+			fmt.Print("\033[A\033[2K")
+			fmt.Print("Choice outside expected range. Please choose again: ")
+			continue
+		}
+	}
+}
+
+func NewEntry(serverURL string, sessionToken [16]byte, adminToken [16]byte, aesKey []byte) (state State, err error) {
+	scanner := bufio.NewScanner(os.Stdin)
+
+	// Prompt title.
+	fmt.Println()
+	fmt.Print("\033[A\033[2K")
+	fmt.Print("Enter Title: ")
+	var title string
+	for {
+
+		// Scan in from the terminal.
+		if !scanner.Scan() {
+			_ = scanner.Err()
+			fmt.Print("\033[A\033[2K")
+			fmt.Print("Error parsing input. Please try entering your title again: ")
+			continue
+		}
+		title = scanner.Text()
+		fmt.Print("\033[A\033[2K")
+		break
+	}
+
+	// Prompt username.
+	fmt.Print("Enter Username: ")
+	var username string
+	for {
+
+		// Scan in from the terminal.
+		if !scanner.Scan() {
+			_ = scanner.Err()
+			fmt.Print("\033[A\033[2K")
+			fmt.Print("Error parsing input. Please try entering your title again: ")
+			continue
+		}
+		username = scanner.Text()
+		fmt.Print("\033[A\033[2K")
+		break
+	}
+
+	// Prompt password.
+	fmt.Print("Enter Password: ")
+	var password string
+	for {
+
+		// Scan in from the terminal.
+		if !scanner.Scan() {
+			_ = scanner.Err()
+			fmt.Print("\033[A\033[2K")
+			fmt.Print("Error parsing input. Please try entering your title again: ")
+			continue
+		}
+		password = scanner.Text()
+		fmt.Print("\033[A\033[2K")
+		break
+	}
+
+	// Prompt confirmation.
+	fmt.Printf("Title: %s\nUsername: %s\nPassword: %s\n\n\033[ADoes this look correct? Enter 0 to return back to entries, Enter 1 to proceed: ", title, username, password)
+loop:
+	for {
+
+		// Scan in from the terminal.
+		if !scanner.Scan() {
+			_ = scanner.Err()
+			fmt.Print("\033[A\033[2K")
+			fmt.Print("Error parsing choice. Please choose again: ")
+			continue
+		}
+
+		// Parse out the first number/word.
+		choice, err := strconv.Atoi(strings.Split(scanner.Text(), " ")[0])
+		if err != nil {
+			fmt.Print("\033[A\033[2K")
+			fmt.Print("Error parsing choice. Please choose again: ")
+			continue
+		}
+
+		// Switch on the number.
+		switch choice {
+		case 0:
+			fmt.Print("\033[4A\033[J")
+			return ENTRIES, nil
+		case 1:
+			fmt.Print("\033[4A\033[J")
+			break loop
+		default:
+			fmt.Print("\033[A\033[2K")
+			fmt.Print("Choice outside expected range. Please choose again: ")
+			continue
+		}
+	}
+
+	// Encrypt data.
+	dataBytes := mustMarshal(struct {
+		Username string
+		Password string
+	}{
+		Username: username,
+		Password: password,
+	})
+
+	ciph, err := aes.NewCipher(aesKey)
+	if err != nil {
+		return ERROR, err
+	}
+	encrypter, err := cipher.NewGCMWithRandomNonce(ciph)
+	if err != nil {
+		return ERROR, err
+	}
+	encrptedData := encrypter.Seal(nil, nil, dataBytes, nil)
+	encryptedTitle := encrypter.Seal(nil, nil, []byte(title), nil)
+
+	// Construct request body.
+	req := mustMarshal(struct {
+		SessionToken [16]byte
+		AdminToken   [16]byte
+		Title        []byte
+		Data         []byte
+	}{
+		SessionToken: sessionToken,
+		AdminToken:   adminToken,
+		Title:        encryptedTitle,
+		Data:         encrptedData,
+	})
+
+	// Send request.
+	res, err := http.Post("http://"+serverURL+"/new_entry", "application/json", bytes.NewReader(req))
+	if err != nil {
+		return ERROR, err
+	}
+	defer res.Body.Close()
+	// Check status code.
+	if res.StatusCode == http.StatusUnauthorized {
+		return RE_AUTHENTICATE, nil
+	} else if res.StatusCode == http.StatusForbidden {
+		return RE_AUTHENTICATE, nil
+	} else if res.StatusCode != http.StatusCreated {
+		return ERROR, fmt.Errorf("Server responded with status code: %d", res.StatusCode)
+	}
+
+	fmt.Println("Entry Created")
+	return ENTRIES, nil
 }
 
 func LogOut(serverURL string, sessionTk [16]byte) (state State, sessionToken [16]byte, adminToken [16]byte, aesKey []byte, username string) {
