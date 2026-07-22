@@ -165,12 +165,12 @@ func (handler *auth2) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Write(res)
 }
 
-type logOut struct {
+type logout struct {
 	DB  *sql.DB
 	ATS *session.AdminTokenStorage
 }
 
-func (handler *logOut) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+func (handler *logout) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	LogRequest(r)
 	body := struct {
 		SessionToken [16]byte
@@ -182,7 +182,7 @@ func (handler *logOut) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	handler.ATS.Remove(body.SessionToken)
-	_, err = handler.DB.Exec("DELETE FROM sessions WHERE token = ?", body.SessionToken)
+	_, err = handler.DB.Exec("DELETE FROM sessions WHERE token = ?", body.SessionToken[:])
 	if err != nil {
 		log.Println(err)
 		w.WriteHeader(http.StatusBadRequest)
@@ -350,4 +350,140 @@ func (handler *new_entry) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusCreated)
+}
+
+type update_entry struct {
+	DB  *sql.DB
+	ATS *session.AdminTokenStorage
+}
+
+func (handler *update_entry) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	LogRequest(r)
+	body := struct {
+		SessionToken [16]byte
+		AdminToken   [16]byte
+		Title        []byte
+		Data         []byte
+		EntryID      int
+	}{}
+	err := json.NewDecoder(r.Body).Decode(&body)
+	if err != nil {
+		log.Println(err)
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+	id := 0
+	err = handler.DB.QueryRow("SELECT userID FROM sessions WHERE token = ?", body.SessionToken[:]).Scan(&id)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			log.Println("Request made with unknown token")
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		} else {
+			log.Println(err)
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+	}
+	if !handler.ATS.Check(body.SessionToken, body.AdminToken) {
+		log.Println("Invalid admin token used.")
+		w.WriteHeader(http.StatusForbidden)
+		return
+	}
+	_, err = handler.DB.Exec("UPDATE entries SET title = ?, data = ? WHERE userID = ? AND id = ?", body.Title, body.Data, id, body.EntryID)
+	if err != nil {
+		log.Println(err)
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+type delete_entry struct {
+	DB  *sql.DB
+	ATS *session.AdminTokenStorage
+}
+
+func (handler *delete_entry) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	LogRequest(r)
+	body := struct {
+		SessionToken [16]byte
+		AdminToken   [16]byte
+		EntryID      int
+	}{}
+	err := json.NewDecoder(r.Body).Decode(&body)
+	if err != nil {
+		log.Println(err)
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+	id := 0
+	err = handler.DB.QueryRow("SELECT userID FROM sessions WHERE token = ?", body.SessionToken[:]).Scan(&id)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			log.Println("Request made with unknown token")
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		} else {
+			log.Println(err)
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+	}
+	if !handler.ATS.Check(body.SessionToken, body.AdminToken) {
+		log.Println("Invalid admin token used.")
+		w.WriteHeader(http.StatusForbidden)
+		return
+	}
+	_, err = handler.DB.Exec("DELETE FROM entries WHERE userID = ? AND id = ?", id, body.EntryID)
+	if err != nil {
+		log.Println(err)
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+type delete_account struct {
+	DB  *sql.DB
+	ATS *session.AdminTokenStorage
+}
+
+func (handler *delete_account) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	LogRequest(r)
+	body := struct {
+		SessionToken [16]byte
+		AdminToken   [16]byte
+	}{}
+	err := json.NewDecoder(r.Body).Decode(&body)
+	if err != nil {
+		log.Println(err)
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+	id := 0
+	err = handler.DB.QueryRow("SELECT userID FROM sessions WHERE token = ?", body.SessionToken[:]).Scan(&id)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			log.Println("Request made with unknown token")
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		} else {
+			log.Println(err)
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+	}
+	if !handler.ATS.Check(body.SessionToken, body.AdminToken) {
+		log.Println("Invalid admin token used.")
+		w.WriteHeader(http.StatusForbidden)
+		return
+	}
+	_, err = handler.DB.Exec("DELETE FROM users WHERE id = ?", id)
+	if err != nil {
+		log.Println(err)
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }

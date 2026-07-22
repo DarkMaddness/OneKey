@@ -29,9 +29,12 @@ func Routes(db *sql.DB, ats *session.AdminTokenStorage) []Route {
 		{Path: "POST /register", Handler: &register{DB: db}},
 		{Path: "POST /auth1", Handler: &auth1{DB: db, InProgAuth: &inProgAuth}},
 		{Path: "POST /auth2", Handler: &auth2{DB: db, InProgAuth: &inProgAuth, ATS: ats}},
-		{Path: "POST /logout", Handler: &logOut{DB: db, ATS: ats}},
+		{Path: "POST /logout", Handler: &logout{DB: db, ATS: ats}},
 		{Path: "POST /titles", Handler: &titles{DB: db}},
 		{Path: "POST /entry", Handler: &entry{DB: db}},
 		{Path: "POST /new_entry", Handler: &new_entry{DB: db, ATS: ats}},
+		{Path: "POST /update_entry", Handler: &update_entry{DB: db, ATS: ats}},
+		{Path: "POST /delete_entry", Handler: &delete_entry{DB: db, ATS: ats}},
+		{Path: "POST /delete_account", Handler: &delete_account{DB: db, ATS: ats}},
 	}
 }

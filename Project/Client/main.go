@@ -7,15 +7,17 @@ import (
 
 func main() {
 	var (
-		state        = PARSE_URL
-		serverURL    string
-		sessionToken [16]byte
-		adminToken   [16]byte
-		aesKey       []byte
-		username     string
-		entryID      int
-		retryState   State
-		err          error
+		state          = PARSE_URL
+		serverURL      string
+		sessionToken   [16]byte
+		adminToken     [16]byte
+		aesKey         []byte
+		username       string
+		entryID        int
+		encryptedTitle []byte
+		encryptedData  []byte
+		retryState     State
+		err            error
 	)
 
 main:
@@ -38,13 +40,24 @@ main:
 		case GET_ENTRY:
 			state, retryState, err = Entry(serverURL, sessionToken, aesKey, entryID)
 		case NEW_ENTRY:
-			state, err = NewEntry(serverURL, sessionToken, adminToken, aesKey)
+			state, encryptedTitle, encryptedData, err = NewEntry(aesKey)
+		case CREATE_ENTRY:
+			state, retryState, err = CreateEntry(serverURL, sessionToken, adminToken, encryptedTitle, encryptedData)
+		case EDIT_ENTRY_DETAILS:
+			state, retryState, encryptedTitle, encryptedData, err = EditEntry(serverURL, sessionToken, aesKey, entryID)
+		case UPDATE_ENTRY:
+			state, retryState, err = UpdateEntry(serverURL, sessionToken, adminToken, encryptedTitle, encryptedData, entryID)
+		case DELETE_ENTRY:
+			state, retryState, err = DeleteEntry(serverURL, sessionToken, adminToken, entryID)
 		case LOG_OUT:
-			state, sessionToken, adminToken, aesKey, username = LogOut(serverURL, sessionToken)
+			state, sessionToken, adminToken, aesKey, username, entryID, encryptedTitle, encryptedData = LogOut(serverURL, sessionToken)
+		case DELETE_ACCOUNT:
+			state, retryState, err = DeleteAccount(serverURL, sessionToken, adminToken)
 		case ERROR:
 			fmt.Println(err)
 			state = EXIT
 		case EXIT:
+			fmt.Println("Connection closed.")
 			break main
 		}
 	}

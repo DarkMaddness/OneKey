@@ -286,6 +286,45 @@ I thought about preventing timing attacks on salt retrieval by adding a time gat
 | Updating the account username           | Can you update the username of the account and login.                        | Manual Test  |
 | Deleting the account                    | Can you delete the account and no longer login.                              | Manual Test  |
 | Encryption test                         | Verify by looking at the database and seeing that all entries are encrypted. | Manual Test  |
+
+## QA Test Results
+Part of the through the development, I realized that I could set up automated testing. I thought it would be difficult to coordinate the client side and server side with automated testing, but found out later that by making them child-packages of a parent package, I could import both, and set up the server and then run the client code from the same process.
+
+Unfortunately while I did set up automated testing, it isn't comprehensive yet. Registration and authentication are covered by the automated testing, but entry creation, entry updates, entry deletion, and account deletion are not covered.
+
+Also I didn't achieve all of my goals for features so deployment via docker compose, updating account password, and updating account username are all missing from the tests here.
+
+My client app makes extensive use of cleaning the terminal of text, so it is a little difficult to show the process in images, but here are some screen shots from testing:
+![Automated_Testing](./Assets/Automated_Testing.png)
+![Entry_Creation](./Assets/Entry_Creation.png)
+![Entry_Creation2](./Assets/Entry_Creation2.png)
+![Entry_Retreival](./Assets/Entry_Retreival.png)
+![Entry_Deletion](./Assets/Entry_Deletion.png)
+![Account_Deletion](./Assets/Account_Deletion.png)
+
 ## Conclusion
-## Lessens learned 
+Throughout development, my project stayed largely the same, though there are some changes that happened that mostly come down to not thinking far enough ahead in regards to the operational flow of the app, or the technologies being implemented. For example, I used SRP for account authentication and it  works well, however I initially though I could get it done in 2 requests and responses, but the specific library I used had stricter requirements in the SRP process, and that meant my authentication handshake had to be done over 3 requests and responses.
+
+In a similar vein, I had loose concepts about the process for entry creation and retrieval, but when it came to programming it, I realized that it was impractical and needed to be changed. I had originally planned that upon looking for entries, it would pull all the entries for the user and decrypt them all, but the first thing I thought of was multiple client connections. If I had 2 connections then I would either need to deal with stale data, or or go through that process every time the client changes perspectives, which would be a waste of compute. So instead I changed it so it would first retrieve the titles of the users entries, and then selecting one of the entries, it would then get the username and password from the server.
+
+Most of the changes are things I could have seen coming if I did more research first, or just scratched down my logic process first. Thinking further about my solution is something I will do more going forward, rather then just jumping into a project.
+
+## Lessens learned
+I haven't been a part of many longer projects, and this project has taught me about technical debt and how even on a small scale it can accumulate quickly when decisions are made without much forethought.
+
+I also had first hand experience with the medium size problem issue, or put simply, a problem that is too small to be urgent, but to big to be done quickly, and so instead it keeps getting delayed. For me that was docker compose based deployment for the server. There were several times I thought about doing it, but I always felt the time would be better spent implementing the next feature for the password manager, or quickly fixing some terminal formatting. I don't think I was necessarily wrong, but encountering it was interesting.
+
+This is the largest go project I have worked on, and it revealed to me several aspects of the language that I dislike, and it has changed my preferences for what languages I would choose for a personal project. Just to list a couple, I find the capitalization based visibility for functions and variables to be really bad, if you need to pass a database or other shared objects to different api endpoints, then each endpoint needs to be it's own object with ServeHTTP implemented, which leads to lots of boilerplate code, and I got really tired of "if err ≠ nil", my code does a lot of network communication which is error prone, it also does a lot of encoding and decoding, which is also error prone,and that combination had me writing error blocks to much, I have a section of code that is 30 lines and 18 of them are just error checking blocks.
+
+Lastly, I had chosen to do a terminal client because I thought it would be much easier then a web client, I was only partially right. While a terminal client starts out easier then a web client, once it grows beyond a simple menu selection and instead needs text input, screen clearing, and hidden input. It is suddenly not any easier then a web client, in particular using ascii codes and raw mode to manipulate the terminal moves it beyond the complexity of a simple web app I would argue. In hindsight I think a web app would have been easier, though not in go, and despite that, I am glad I chose to do a terminal app, as it has been a great learning experience and makes me appreciate the terminal apps out there more.
+
 ## Future Work
+Looking forward I would like to complete the features I never managed to get to, but that also leads to some larger decisions, the main one being whether to stay with go as the language.
+
+There have been a number of benefits working in go, it has a web server as part of the standard library, it is fast, it compiles quickly, and using it for both the client and server meant I could share libraries which made encoding much easier, and it also meant my authentication handshake didn't have any weird edge-cases from different implementations.
+
+With that said, my stretch goal had been a web client, and because I need client side processing for authentication and encryption, I will need to find javascript libraries that are compatible with my go based authentication, encryption, and encoding libraries, this could be quite difficult and could even require wrapping some implementation to make them compatible
+
+So for choices are to stick with and try to find compatible libraries for javascript, or re-write everything to javascript/typescript and have it be naturally compatible. This is what I would do, because browser extension also are built with js and that would be the next natural progression, but there is another choice, and the one I am choosing for taking the project further, which is Gleam. Gleam is a language that has borrowed several ideas from rust such as immutability by default, and in gleam's case it is the only choice, result types making error checking cleaner, a pub keyword for visibilty, strong type enforcement, but most import about Gleam for my project is that it can be compiled to two different targets, javascript, and beam, the erlang virtual machine. What this means is that I can have my client compile to js and my server compile to erlang, while internally they share the same libraries and type definitions. I get to write in a systems programming like language while getting the benefits of the js ecosystem, have a web app, being able to create browser extensions, using electron to make a desktop app, and using PWA (progressive web app) to make an android app.
+
+Because of these benefits, I am going to re-write my project in Gleam as the next step for future development, and then continue into other clients and possibly other features like autofilling on browsers and mobile.
