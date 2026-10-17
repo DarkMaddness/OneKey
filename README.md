@@ -10,4 +10,4 @@ Gleam comes in as a language that can be compiled to Javascript and/or Erlang, s
 
 # Demo
 
-![![Demo Video](OneKey_Demo.png)](OneKey_Demo.mp4)
+[![Demo Video](OneKey_Demo.png)](OneKey_Demo.mp4)
